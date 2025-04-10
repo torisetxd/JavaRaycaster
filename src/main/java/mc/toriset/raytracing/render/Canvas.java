@@ -1,6 +1,7 @@
 package mc.toriset.raytracing.render;
 
 import mc.toriset.raytracing.data.Config;
+import mc.toriset.raytracing.world.World;
 
 import java.awt.Color;
 import java.awt.Cursor;
@@ -18,6 +19,11 @@ import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.awt.Font;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.BasicStroke;
+import java.awt.geom.RoundRectangle2D;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -51,6 +57,16 @@ public class Canvas extends java.awt.Canvas implements Runnable {
     private BufferedImage cursorImg;
     private Cursor blankCursor;
 
+    private int fps = 0;
+    private int frameCount = 0;
+    private long lastFpsUpdate = 0;
+    private boolean showDebugOverlay = true;
+    private int overlayStyle = 0;
+
+    private long frameTimeSum = 0;
+    private int frameTimeCount = 0;
+    private double avgFrameTimeMs = 0;
+
     public Canvas(int virtualWidth, int virtualHeight, int windowWidth, int windowHeight) {
         this.virtualWidth = virtualWidth;
         this.virtualHeight = virtualHeight;
@@ -80,6 +96,13 @@ public class Canvas extends java.awt.Canvas implements Runnable {
             public void keyPressed(KeyEvent e) {
                 if (e.getKeyCode() == KeyEvent.VK_ESCAPE) {
                     toggleMouseLock();
+                } else if (e.getKeyCode() == KeyEvent.VK_F3) {
+                    overlayStyle = (overlayStyle + 1) % 2;
+                    if (overlayStyle == 0) {
+                        showDebugOverlay = false;
+                    } else {
+                        showDebugOverlay = true;
+                    }
                 }
 
                 Runnable handler = keyHandlers.get(e.getKeyCode());
@@ -245,8 +268,27 @@ public class Canvas extends java.awt.Canvas implements Runnable {
     }
 
     private void update() {
-        Renderer.render(this);
+        long startTime = System.currentTimeMillis();
+
+        frameCount++;
+        long currentTime = System.currentTimeMillis();
+        if (currentTime - lastFpsUpdate > 1000) {
+            fps = frameCount;
+            frameCount = 0;
+            lastFpsUpdate = currentTime;
+        }
+
         updateHandler.accept(this);
+
+        long frameTime = System.currentTimeMillis() - startTime;
+        frameTimeSum += frameTime;
+        frameTimeCount++;
+
+        if (frameTimeCount >= 10) {
+            avgFrameTimeMs = (double) frameTimeSum / frameTimeCount;
+            frameTimeSum = 0;
+            frameTimeCount = 0;
+        }
     }
 
     private void draw() {
@@ -258,8 +300,45 @@ public class Canvas extends java.awt.Canvas implements Runnable {
 
         Graphics g = bs.getDrawGraphics();
         g.drawImage(virtualSurface, 0, 0, windowWidth, windowHeight, null);
+
+        if (showDebugOverlay) {
+            drawDebugOverlay(g);
+        }
+
         g.dispose();
         bs.show();
+    }
+
+    private void drawDebugOverlay(Graphics g) {
+        Graphics2D g2d = (Graphics2D) g;
+
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+
+        ProgressiveRenderer.RenderStats stats = ProgressiveRenderer.getRenderStats();
+
+        if (overlayStyle == 1) {
+
+            g2d.setColor(new Color(0, 0, 0, 180));
+            g2d.fillRect(10, 10, 260, 95);
+
+            g2d.setColor(Color.WHITE);
+            g2d.setFont(new Font("Monospaced", Font.PLAIN, 12));
+
+            int y = 25;
+            g2d.drawString("FPS: " + fps + " | Frame Time: " + String.format("%.1f", avgFrameTimeMs) + "ms", 20, y);
+            y += 15;
+            g2d.drawString("Camera: (" + String.format("%.2f", World.camera.location.getX()) +
+                    ", " + String.format("%.2f", World.camera.location.getY()) +
+                    ", " + String.format("%.2f", World.camera.location.getZ()) + ")", 20, y);
+            y += 15;
+            g2d.drawString("Yaw: " + String.format("%.1f", World.camera.yaw) +
+                    " Pitch: " + String.format("%.1f", World.camera.pitch), 20, y);
+            y += 15;
+            g2d.drawString("Mode: " + stats.renderMode + " | Samples: " + stats.averageSamples, 20, y);
+            y += 15;
+            g2d.drawString("Status: " + stats.statusMessage, 20, y);
+        }
     }
 
     @Override
